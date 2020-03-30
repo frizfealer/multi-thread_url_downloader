@@ -91,6 +91,7 @@ class URLDownloader:
                  ):
         """ 
         The constructor for URLDownloader Class. It saves the parameters as attributes, set some attributes, and call update_downloading_status
+        
         Parameters: 
             url_list (list): a list of url to download.
             out_path (string): the path to the output folder 
