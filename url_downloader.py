@@ -3,7 +3,7 @@ import requests
 import threading
 import time
 import io
-from PIL import Image
+# from PIL import Image
 from urllib.parse import urljoin, urlparse
 import mimetypes
 import os
@@ -55,32 +55,27 @@ def get_session():
         thread_local.session = requests.Session()
     return thread_local.session
 
-
-
 class URLDownloader:
     """ 
     This is a class for downloading a batch of urls via http connection.
       
     Attributes: 
         url_list (list): a list of url to download.
-        out_path (string): the path to the output folder 
+        out_path (string): the path to the output folder /
+        outpath_list (list): appending the outname with outpath.
         num_thread (int): the number of thread used for download.
         err_tolerance_num (int): the number of error tolerance for downloading.
         stop_interval (int): the secs to stop after error number exceeds the  err_tolerance_num
         time_out_for_GET (int): the time limit for http GET
         http_headers (dict): the header for http.
-        remove_dup_img (boolean): whether to remove the same image with different urls.
         outname_list (list): the list for the output file name. The default behaviour is using the file name in the url. If this is specified, it will overwrite the default name.
         err_cnter (int): counter for counting consecutive errors.
-        img_hash_set: set for current images' has codes.
         log_file (string): a file name for logging, saving inside the out_path.
-        _hash_lock (Lock): avoid race condition. this lock is for img_hash_set
         _errs_cnter_lock (RLock): avoid race condition. this lock is for err_cnter
         __log_lock (Lock): avoid race condition. this lock is for log_file
-        outpath_list (list): appending the outname with outpath
     """
-    def __init__(self, url_list, 
-                 out_path, 
+    def __init__(self, url_list,
+                 out_path,
                  num_thread=4,
                  err_tolerance_num=1000,
                  stop_interval=0,
@@ -106,37 +101,38 @@ class URLDownloader:
         Returns: 
             The URLDownloader object
         """
-        self.url_list = url_list
         self.out_path = out_path
+        if outname_list:
+            assert(len(url_list) == len(outname_list))
+            url2oname = {url: oname for url, oname in zip(url_list, outname_list)}
+            url_list = [k for k in url2oname.keys()]
+            outname_list = [v for v in url2oname.values()]
+        else:
+            url_list = list(set(url_list))
+        if outname_list:
+            self.outpath_list = [os.path.join(out_path, name) for name in outname_list]
+        else:
+            self.outpath_list = [self.get_outpath_from_url(i) for i in url_list]
+        self.url_list = url_list
         self.num_thread = num_thread
         self.err_tolerance_num = err_tolerance_num
         self.stop_interval = stop_interval
         self.time_out_for_GET = time_out_for_GET
         self.http_headers = http_headers
-        self.remove_dup_img = remove_dup_img
-        self.outname_list = outname_list
 
         self.err_cnter = 0
         self.url_cnter = 0
-        self.img_hash_set = set()
-        self.log_file = os.path.join(self.out_path, 'downloaded.log')
-        self._hash_lock = threading.Lock()
+        self.log_file = os.path.join(out_path, 'downloaded.log')
         self._errs_cnter_lock = threading.Lock()
         self._log_lock = threading.Lock()
-        self._check_url_lock = threading.Lock()
-        if not os.path.exists(self.out_path): 
-            print('output folder is not exist, create "{}" folder'.format(self.out_path))
-            os.makedirs(self.out_path)
-        if not os.path.exists(self.log_file): open(self.log_file, 'w')
+        # self._check_url_lock = threading.Lock()
+        if not os.path.exists(out_path): 
+            print('output folder is not exist, create "{}" folder'.format(out_path))
+            os.makedirs(out_path)
+        if not os.path.exists(self.log_file): 
+            f = open(self.log_file, 'w')
+            f.close()
         #self.adapter = HTTPAdapter(max_retries=3)
-        if self.outname_list:
-            self.outpath_list = []
-            for url, outname in zip(self.url_list, self.outname_list):
-                if is_url_image(url) and '.' not in outname:
-                    outname += '.{}'.format('jpg')
-                self.outpath_list.append(os.path.join(self.out_path, outname))
-        else:
-            self.outpath_list = [self.get_outpath_from_url(i) for i in url_list]
         #self.check_urls()
         self.update_downloading_status()
 
@@ -155,8 +151,6 @@ class URLDownloader:
         tmp = []
         with open(self.log_file, 'r') as f:
             downloaded_url = collections.Counter([line.split('\t')[0] for line in f])
-            downloaded_hash = set([line.split('\t')[1] for line in f if line.split('\t')[1] != ''])
-        self.img_hash_set |= downloaded_hash
         for url, outpath in zip(self.url_list, self.outpath_list):
             if url in downloaded_url:
                 downloaded_url[url] -= 1
@@ -164,7 +158,7 @@ class URLDownloader:
                     downloaded_url.pop(url)
             else:
                 tmp.append((url, outpath))
-        #random.shuffle(tmp)
+        # random.shuffle(tmp)
         self.url_list = [i[0] for i in tmp]
         self.outpath_list = [i[1] for i in tmp]
 
@@ -221,24 +215,11 @@ class URLDownloader:
                 if self.url_cnter % 1000 == 0:
                     print('# processed url: {}...'.format(self.url_cnter), end='', file=sys.stderr, flush=True)
                 #print(f"Read {len(response.content)} from {url}")
-                hashstr = ''
-                if is_url_image(url):
-                    img = Image.open(io.BytesIO(response.content))
-                    if self.remove_dup_img:
-                        self._hash_lock.acquire()
-                        hashstr = hashlib.md5(img.tobytes()).hexdigest()
-                        if hashstr not in self.img_hash_set:
-                            self.img_hash_set.add(hashstr)
-                            img.save(outpath)
-                        self._hash_lock.release()
-                    else:
-                        img.save(outpath)
-                else:
-                    with open(outpath, 'wb') as f:
-                        f.write(response.content)
+                with open(outpath, 'wb') as f:
+                    f.write(response.content)
                 with self._log_lock:
                     with open(self.log_file, 'a') as f:
-                        f.write('{}\t{}\n'.format(url, hashstr))
+                        f.write('{}\t{}\n'.format(url, 'o'))
                 with self._errs_cnter_lock:
                     self.err_cnter = 0
             else:
@@ -255,8 +236,7 @@ class URLDownloader:
                         self.err_cnter += 1
                 with self._log_lock:
                     with open(self.log_file, 'a') as f:
-                        f.write('{}\t{}\n'.format(url, ''))
-
+                        f.write('{}\t{}\n'.format(url, 'x'))
 
     def download_all_sites(self):
         """ 
@@ -273,7 +253,8 @@ class URLDownloader:
 
 if __name__ == "__main__":
     import shutil
-    if os.path.exists('test_out'): shutil.rmtree('test_out')
+    if os.path.exists('test_out'):
+        shutil.rmtree('test_out')
     sites = [
         "https://www.jython.org/",
         "http://olympus.realpython.org/dice",
@@ -282,12 +263,13 @@ if __name__ == "__main__":
         'https://images.lowes.com/product/converted/885612/885612279095lg.jpg'
     ] 
     print('testing constructor...')
-    downloader = URLDownloader(sites, 'test_out', 3, outname_list=['1', '2', '3', '4', '5'], remove_dup_img=True)
+    downloader = URLDownloader(sites, 'test_out', 3, outname_list=['1', '2', '3', '4', '5'])
     print('the urls need to be downloaded:')
     print(downloader.url_list)
     print('the output path to save files:')
     print(downloader.outpath_list)
     print('--------------------------------------------------------------------')
+    input('Press "Enter" to continue...')
 
     print('testing download_site...')
     downloader.download_site(downloader.url_list[0], downloader.outpath_list[0])
@@ -299,6 +281,7 @@ if __name__ == "__main__":
     print('the output path to save files:')
     print(downloader.outpath_list)    
     print('--------------------------------------------------------------------')
+    input('Press "Enter" to continue...')
 
     print('testing download_all_sites..')
     downloader.download_all_sites()
@@ -307,15 +290,16 @@ if __name__ == "__main__":
     print('the urls need to be downloaded:')
     print(downloader.url_list)
     print('the output path to save files:')
-    print(downloader.outpath_list)    
+    print(downloader.outpath_list)
     print('--------------------------------------------------------------------')
-
-    #downloader = URLDownloader(sites, '.', 1)
-    #downloader.download_all_sites()
+    input('Press "Enter" to continue...')
 
     print('testing error urls...')
-    sites = [ "https://www.jython.org/hi"]*50
-    if os.path.exists('test_out'): shutil.rmtree('test_out2')
+    sites = [s + 'abcde' for s in sites]
+    print(sites)
+    if os.path.exists('test_out2'):
+        shutil.rmtree('test_out2')
     downloader = URLDownloader(sites, 'test_out2', 3, err_tolerance_num=10, stop_interval=5)
     downloader.download_all_sites()
-
+    print('--------------------------------------------------------------------')
+    input('Press "Enter" to continue...')
