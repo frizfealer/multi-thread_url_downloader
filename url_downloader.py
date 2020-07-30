@@ -81,8 +81,9 @@ class URLDownloader:
                  stop_interval=0,
                  time_out_for_GET=600,
                  http_headers={},
-                 remove_dup_img=False, 
+                 remove_dup_img=False,
                  outname_list=None,
+                 verbose=True
                  ):
         """ 
         The constructor for URLDownloader Class. It saves the parameters as attributes, set some attributes, and call update_downloading_status
@@ -119,6 +120,7 @@ class URLDownloader:
         self.stop_interval = stop_interval
         self.time_out_for_GET = time_out_for_GET
         self.http_headers = http_headers
+        self.verbose = verbose
 
         self.err_cnter = 0
         self.url_cnter = 0
@@ -194,14 +196,14 @@ class URLDownloader:
         return outpath
 
     def download_site(self, url, outpath):
-        """ 
+        """
         This function download an url and save its content to the outpath.
-        
-        Parameters: 
+
+        Parameters:
             url (string): the url to downalod.
             outpath (string): the output path to save the content.
 
-        Returns: 
+        Returns:
             None
         """
         session = get_session()
@@ -210,9 +212,10 @@ class URLDownloader:
         #print('url: {}, outpath: {}'.format(url, outpath))
         with session.get(url, timeout=self.time_out_for_GET) as response:
             if response:
-                print('o', end='', file=sys.stderr, flush=True)
+                if self.verbose:
+                    print('o', end='', file=sys.stderr, flush=True)
                 self.url_cnter += 1
-                if self.url_cnter % 1000 == 0:
+                if self.url_cnter % 1000 == 0 and self.verbose:
                     print('# processed url: {}...'.format(self.url_cnter), end='', file=sys.stderr, flush=True)
                 #print(f"Read {len(response.content)} from {url}")
                 with open(outpath, 'wb') as f:
@@ -249,7 +252,22 @@ class URLDownloader:
             None
         """
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_thread) as executor:
-                executor.map(self.download_site, self.url_list, self.outpath_list)
+            executor.map(self.download_site, self.url_list, self.outpath_list)
+
+    def batch_download_sites(self, num):
+        """ 
+        This function calls [self.num_thread] threads to download urls.
+        Its a multithread version of download_site
+        
+        Parameters: 
+            None
+        Returns: 
+            None
+        """
+        print('# files to download: {}'.format(len( self.url_list[:num])))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_thread) as executor:
+            executor.map(self.download_site, self.url_list[:num], self.outpath_list[:num])
+        self.update_downloading_status()
 
 if __name__ == "__main__":
     import shutil
